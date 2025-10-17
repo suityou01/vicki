@@ -1,4 +1,4 @@
-##!/usr/bin/env bash
+#!/usr/bin/env bash
 set -e
 
 # Update system
@@ -45,10 +45,10 @@ cd /tmp
 wget https://releases.wikimedia.org/mediawiki/1.41/mediawiki-1.41.0.tar.gz
 tar -xzf mediawiki-1.41.0.tar.gz
 mv mediawiki-1.41.0 /var/www/html/mediawiki
-chown -R www-data:www-data /var/html/www/mediawiki
+chown -R www-data:www-data /var/www/html/mediawiki
 
 # Configure Apache
-cat > etc/apache2/sites-available/mediawiki.conf <<'EOF'
+cat > /etc/apache2/sites-available/mediawiki.conf <<'EOF'
 <VirtualHost *:80>
   ServerName squad4.wiki
   DocumentRoot /var/www/html/mediawiki
@@ -120,7 +120,7 @@ $wgUseImageMagickConvertCommand = "/usr/bin/convert";
 wfLoadExtension( 'SyntaxHighlight_GeSHi' );
 
 # Mermaid extension
-wfLoadExtenion( 'Mermaid' );
+wfLoadExtension( 'Mermaid' );
 $wgMermaidCli = '/usr/bin/mmdc';
 
 # GraphViz extension
@@ -139,16 +139,16 @@ $wgUseCdn = true;
 $wgCdnServers = array( '10.0.0.0/8' );
 
 # Set up for authentication via ALB headers
-If (isset($_SERVER['HTTP_X_AMZN_OIDC_DATA'])) {
+if (isset($_SERVER['HTTP_X_AMZN_OIDC_DATA'])) {
    $wgAuth = new ExternalAuth();
    $wgGroupPermissions['*']['autocreateaccount'] = true;
-   $wgGroupPermissiosn['*']['createaccount'] = false;
+   $wgGroupPermissions['*']['createaccount'] = false;
 }
 
 # Performance optimizations
 $wgMainCacheType = CACHE_ACCEL;
 $wgMemCachedServers = [];
-$wgCacheDirector = "/var/cache/mediawiki";
+$wgCacheDirectory = "/var/cache/mediawiki";
 
 # Permissions
 $wgGroupPermissions['*']['edit'] = false;
@@ -175,7 +175,7 @@ AWS_REGION="${aws_region}"
 mkdir -p "$BACKUP_DIR"
 
 # Backup files
-tar -czf "$BACKUP_DIR/images.tar.gz" -c /var/www/html/mediawiki/images .
+tar -czf "$BACKUP_DIR/images.tar.gz" -C /var/www/html/mediawiki/images .
 cp /var/www/html/mediawiki/LocalSettings.php "$BACKUP_DIR/"
 
 # Create archive
@@ -190,14 +190,14 @@ rm -rf "$BACKUP_DIR"
 rm "mediawiki-backup-$TIMESTAMP.tar.gz"
 
 # Log to CloudWatch (options, requires CloudWatch agent)
-echo "Backup completed successfully: mediawiki-backup-$TIMESTAMP.tar.gz:
+echo "Backup completed successfully: mediawiki-backup-$TIMESTAMP.tar.gz"
 BACKUP_SCRIPT
 
 chmod +x /usr/local/bin/backup-mediawiki.sh
 
 # Schedule daily backups at 2AM
 cat > /etc/cron.d/mediawiki-backup <<'CRON'
-0 2 * * * root /usr/local/bin/backup-mediawiki.sh >> /var/log/mediawiki-backlog.log 2>&1
+0 2 * * * root /usr/local/bin/backup-mediawiki.sh >> /var/log/mediawiki-backup.log 2>&1
 CRON
 
 # Install Cloudwatch agent
@@ -212,7 +212,7 @@ cat > /opt/aws/amazon-cloudwatch-agent/etc/config.json <<'CWCONFIG'
       "files": {
         "collected_list": [
           {
-            "file_path": "/var/log/media-wiki-backup.log",
+            "file_path": "/var/log/mediawiki-backup.log",
             "log_group_name": "/mediawiki/apache-error",
             "log-stream-name": "{instance_id}"
           }

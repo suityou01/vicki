@@ -49,7 +49,7 @@ variable "mediawiki_admin_password" {
   sensitive   = true
 }
 
-resouce "aws_s3_bucket" "mediawiki_backups" {
+resource "aws_s3_bucket" "mediawiki_backups" {
   bucket = "mediawiki-backups-${data.aws_caller_identity.current.account_id}"
   tags = {
     Name        = "MediaWiki Backups"
@@ -71,6 +71,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "mediawiki_backups" {
   rule {
     id     = "backup-retention"
     status = "Enabled"
+    filter {}
 
     transition {
       days          = 30
@@ -78,12 +79,12 @@ resource "aws_s3_bucket_lifecycle_configuration" "mediawiki_backups" {
     }
 
     expiration {
-      dats = 90
+      days = 90
     }
   }
 }
 
-resouce "aws_route53_zone" "private" {
+resource "aws_route53_zone" "private" {
   name = "squad4.wiki"
 
   vpc {
@@ -96,14 +97,14 @@ resouce "aws_route53_zone" "private" {
 }
 
 # Security group for ALB
-resource "aws_securuity_group" "alb" {
-  name_description = "Security group for MedialWiki ALB"
-  vpc_id           = var.vpc_id
+resource "aws_security_group" "alb" {
+  description = "Security group for MedialWiki ALB"
+  vpc_id      = var.vpc_id
 
   ingress {
     from_port   = 443
     to_port     = 443
-    protocol    = tcp
+    protocol    = "tcp"
     cidr_blocks = var.vpn_cidr_blocks
   }
 
@@ -128,14 +129,14 @@ resource "aws_securuity_group" "alb" {
 
 
 resource "aws_security_group" "mediawiki" {
-  name_description = "Security group for MediaWiki EC2 instance"
-  vpc_id           = var.vpc_id
+  description = "Security group for MediaWiki EC2 instance"
+  vpc_id      = var.vpc_id
 
   ingress {
     from_port       = 80
     to_port         = 80
     protocol        = "tcp"
-    security_groups = [aws.security_group.alb.id]
+    security_groups = [aws_security_group.alb.id]
   }
 
   ingress {
@@ -152,23 +153,26 @@ resource "aws_security_group" "mediawiki" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  tags {
+  tags = {
     Name = "mediawiki-ec2-sg"
   }
 
 }
 
 resource "aws_iam_role" "mediawiki" {
-  Version = "2012-10-17"
-  Statement = [
-    {
-      Action = "sts:AssumeRole"
-      Effect = "Allow"
-      Principal = {
-        Service = "ec2.amazonaws.com"
+  name = "mediawiki-role"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        }
       }
-    }
-  ]
+    ]
+  })
 }
 
 resource "aws_iam_role_policy" "mediawiki_s3" {
@@ -212,7 +216,7 @@ resource "aws_lb" "mediawiki" {
   }
 }
 
-resource "aws_lb_target_group" "mediawiki1" {
+resource "aws_lb_target_group" "mediawiki_tg" {
   name     = "mediawiki-tg"
   port     = 80
   protocol = "HTTP"
@@ -236,11 +240,11 @@ resource "aws_lb_listener" "mediawiki_https" {
   port              = "443"
   protocol          = "HTTPS"
   ssl_policy        = "ELBSecurityPolicy-TLS-1-2-2017-01"
-  certification_arn = aws_acm_certificate.mediawiki.arn
+  certificate_arn   = aws_acm_certificate.mediawiki.arn
 
   default_action {
     type             = "forward"
-    target_group_arn = aws_lb_target_group.mediawiki.arn
+    target_group_arn = aws_lb_target_group.mediawiki_tg.arn
   }
 }
 
@@ -274,7 +278,7 @@ resource "aws_acm_certificate" "mediawiki" {
 }
 
 # Route53 Record for ALB
-resource "aws_route_53_record" "mediawiki" {
+resource "aws_route53_record" "mediawiki" {
   zone_id = aws_route53_zone.private.zone_id
   name    = "squad4.wiki"
   type    = "A"
@@ -305,14 +309,14 @@ data "aws_ami" "ubuntu" {
 resource "aws_instance" "mediawiki" {
   ami                    = data.aws_ami.ubuntu.id
   instance_type          = "t3.medium"
-  key_name               = var.key.name
+  key_name               = var.key_name
   vpc_security_group_ids = [aws_security_group.mediawiki.id]
   subnet_id              = var.private_subnet_ids[0]
   iam_instance_profile   = aws_iam_instance_profile.mediawiki.name
 
   user_data = base64encode(templatefile("${path.module}/mediawiki-setup.sh", {
-    admin_password = var.mediawiki1_admin_password
-    s3_bucket      = aws_s3_bucket.mediawiki_backups-id
+    admin_password = var.mediawiki_admin_password
+    s3_bucket      = aws_s3_bucket.mediawiki_backups.id
     aws_region     = var.aws_region
   }))
 
@@ -327,7 +331,7 @@ resource "aws_instance" "mediawiki" {
 }
 
 resource "aws_lb_target_group_attachment" "mediawiki" {
-  target_group_arn = aws_lb_target_group.mediawiki.arn
+  target_group_arn = aws_lb_target_group.mediawiki_tg.arn
   target_id        = aws_instance.mediawiki.id
   port             = 80
 }
