@@ -12,7 +12,7 @@ ENV NODE_VERSION=22.14.0
 
 # Install base packages (but don't configure MySQL yet)
 RUN apt-get update \
-    && apt-get install -y curl apache2 mysql-server sudo \
+    && apt-get install -y curl apache2 mysql-server \
     && apt-get -y autoclean
 
 # Setup MySQL user and directories
@@ -82,6 +82,11 @@ if [ ! -f "/var/www/html/mediawiki/LocalSettings.php" ]; then
 else
     echo "MediaWiki already installed, skipping setup..."
 fi
+
+# Stop Apache if it's running (from the setup script)
+echo "Stopping any existing Apache processes..."
+service apache2 stop || true
+sleep 2
 
 echo "Starting Apache in foreground..."
 apachectl -D FOREGROUND

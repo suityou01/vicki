@@ -111,13 +111,10 @@ if [ ! -d "Mermaid" ]; then
     cd ..
 fi
 
-# GraphViz extension
-if [ ! -d "GraphViz" ]; then
-    git clone https://gerrit.wikimedia.org/r/mediawiki/extensions/GraphViz
-    cd GraphViz
-    composer install --no-dev
-    cd ..
-fi
+# GraphViz extension - skip for now, older extension format
+# if [ ! -d "GraphViz" ]; then
+#     git clone https://gerrit.wikimedia.org/r/mediawiki/extensions/GraphViz
+# fi
 
 # VisualEditor
 if [ ! -d "VisualEditor" ]; then
@@ -130,6 +127,9 @@ fi
 # Configure LocalSettings.php
 cat >> /var/www/html/mediawiki/LocalSettings.php <<'EOF'
 
+# Set the server URL (important for Docker port mapping)
+$wgServer = "http://localhost:8080";
+
 # Enable file uploads
 $wgEnableUploads = true;
 $wgUseImageMagickConvertCommand = "/usr/bin/convert";
@@ -140,10 +140,6 @@ wfLoadExtension( 'SyntaxHighlight_GeSHi' );
 # Mermaid extension
 wfLoadExtension( 'Mermaid' );
 $wgMermaidCli = '/usr/bin/mmdc';
-
-# GraphViz extension
-wfLoadExtension( 'GraphViz' );
-$wgGraphVizSettings->execPath = '/usr/bin';
 
 # VisualEditor
 wfLoadExtension( 'VisualEditor' );

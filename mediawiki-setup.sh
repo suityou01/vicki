@@ -7,45 +7,53 @@ apt-get upgrade -y
 
 # Install required packages
 apt-get install -y \
-		apache2 \
-		mysql-server \
-		php \
-		php-mysql \
-		php-xml \
-		php-mbstring \
-		php-intl \
-		php-apcu \
-		php-curl \
-		php-gd \
-		libapache2-mod-php \
-		wget \
-		unzip \
-		git \
-		python3-pip \
-		graphviz \
-		imagemagick \
-		awscli
+    apache2 \
+    mysql-server \
+    php \
+    php-mysql \
+    php-xml \
+    php-mbstring \
+    php-intl \
+    php-apcu \
+    php-curl \
+    php-gd \
+    libapache2-mod-php \
+    wget \
+    unzip \
+    git \
+    python3-pip \
+    graphviz \
+    imagemagick \
+    awscli
 
 # Install Pygments for syntax highlighting
 pip3 install Pygments
+
+# Install Composer
+curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
 
 # Install Node.js for Mermaid CLI
 curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
 apt-get install -y nodejs
 npm install -g @mermaid-js/mermaid-cli
 
+# Generate a random password for MySQL
+DB_PASSWORD=$(openssl rand -base64 32)
+
 # Configure MySQL
-mysql -e "CREATE DATABASE mediawiki;"
-mysql -e "CREATE USER 'mediawiki'@'localhost' IDENTIFIED BY '$(openssl rand -base64 32)';"
+mysql -e "CREATE DATABASE IF NOT EXISTS mediawiki;"
+mysql -e "CREATE USER IF NOT EXISTS 'mediawiki'@'localhost' IDENTIFIED BY '${DB_PASSWORD}';"
 mysql -e "GRANT ALL PRIVILEGES ON mediawiki.* TO 'mediawiki'@'localhost';"
 mysql -e "FLUSH PRIVILEGES;"
 
 # Download and install MediaWiki
-cd /tmp
-wget https://releases.wikimedia.org/mediawiki/1.41/mediawiki-1.41.0.tar.gz
-tar -xzf mediawiki-1.41.0.tar.gz
-mv mediawiki-1.41.0 /var/www/html/mediawiki
-chown -R www-data:www-data /var/www/html/mediawiki
+if [ ! -d "/var/www/html/mediawiki" ]; then
+    cd /tmp
+    wget https://releases.wikimedia.org/mediawiki/1.41/mediawiki-1.41.0.tar.gz
+    tar -xzf mediawiki-1.41.0.tar.gz
+    mv mediawiki-1.41.0 /var/www/html/mediawiki
+    chown -R www-data:www-data /var/www/html/mediawiki
+fi
 
 # Configure Apache
 cat > /etc/apache2/sites-available/mediawiki.conf <<'EOF'
@@ -60,7 +68,7 @@ cat > /etc/apache2/sites-available/mediawiki.conf <<'EOF'
   </Directory>
 
   ErrorLog /var/log/apache2/mediawiki-error.log
-  CustomLog /var/log/apache2/media-wiki-access.log combined
+  CustomLog /var/log/apache2/mediawiki-access.log combined
 </VirtualHost>
 EOF
 
@@ -70,44 +78,46 @@ a2enmod rewrite
 systemctl restart apache2
 
 # Run MediaWiki installation
-cd /var/www/html/mediawiki
-php maintenance/install.php \
-	--dbname=mediawiki \
-	--dbserver=localhost \
-	--dbuser=mediawiki \
-	--dbpass="$(mysql -e "SELECT authentication_string FROM mysql.user WHERE user='mediawiki' AND host='localhost';" -sN)" \
-	--scriptpath="" \
-	--lang=en \
-	--pass="${admin_password}" \
-	"Squad4 Wiki" \
-	"admin"
+if [ ! -f "/var/www/html/mediawiki/LocalSettings.php" ]; then
+    cd /var/www/html/mediawiki
+    php maintenance/install.php \
+        --dbname=mediawiki \
+        --dbserver=localhost \
+        --dbuser=mediawiki \
+        --dbpass="${DB_PASSWORD}" \
+        --scriptpath="" \
+        --lang=en \
+        --pass="${admin_password}" \
+        "Squad4 Wiki" \
+        "admin"
+fi
 
 # Download and install extensions
 cd /var/www/html/mediawiki/extensions
 
 # SyntaxHighlight_GeSHi extension
-git clone https://gerrit.wikimedia.org/r/mediawiki/extensions/SyntaxHighlight_GeSHi
-cd SyntaxHighlight_GeSHi
-composer install --no-dev
-cd ..
+if [ ! -d "SyntaxHighlight_GeSHi" ]; then
+    git clone https://gerrit.wikimedia.org/r/mediawiki/extensions/SyntaxHighlight_GeSHi
+    cd SyntaxHighlight_GeSHi
+    composer install --no-dev
+    cd ..
+fi
 
 # Mermaid extension
-git clone https://github.com/SemanticMediaWiki/Mermaid.git
-cd Mermaid
-composer install --no-dev
-cd ..
-
-# GraphViz extension
-git clone https://gerrit.wikimedia.org/r/wikimedia/extensions/GraphViz
-cd GraphViz
-composer install --no-dev
-cd ..
+if [ ! -d "Mermaid" ]; then
+    git clone https://github.com/SemanticMediaWiki/Mermaid.git
+    cd Mermaid
+    composer install --no-dev
+    cd ..
+fi
 
 # VisualEditor
-git clone https://gerrit.wikimedia.org/r/mediawiki/extensions/VisualEditor
-cd VisualEditor
-composer install --no-dev
-cd ..
+if [ ! -d "VisualEditor" ]; then
+    git clone https://gerrit.wikimedia.org/r/mediawiki/extensions/VisualEditor
+    cd VisualEditor
+    composer install --no-dev
+    cd ..
+fi
 
 # Configure LocalSettings.php
 cat >> /var/www/html/mediawiki/LocalSettings.php <<'EOF'
@@ -121,11 +131,7 @@ wfLoadExtension( 'SyntaxHighlight_GeSHi' );
 
 # Mermaid extension
 wfLoadExtension( 'Mermaid' );
-$wgMermaidCli = '/usr/bin/mmdc';
-
-# GraphViz extension
-wfLoadExtension( 'GraphViz' );
-$wgGraphVizSettings->execPath = '/usr/bin';
+$wgMermaidCli = '/usr/local/bin/mmdc';
 
 # VisualEditor
 wfLoadExtension( 'VisualEditor' );
@@ -174,6 +180,9 @@ AWS_REGION="${aws_region}"
 
 mkdir -p "$BACKUP_DIR"
 
+# Backup database
+mysqldump mediawiki -u mediawiki > "$BACKUP_DIR/database.sql"
+
 # Backup files
 tar -czf "$BACKUP_DIR/images.tar.gz" -C /var/www/html/mediawiki/images .
 cp /var/www/html/mediawiki/LocalSettings.php "$BACKUP_DIR/"
@@ -189,7 +198,6 @@ aws s3 cp "mediawiki-backup-$TIMESTAMP.tar.gz" "s3://$S3_BUCKET/backups/" --regi
 rm -rf "$BACKUP_DIR"
 rm "mediawiki-backup-$TIMESTAMP.tar.gz"
 
-# Log to CloudWatch (options, requires CloudWatch agent)
 echo "Backup completed successfully: mediawiki-backup-$TIMESTAMP.tar.gz"
 BACKUP_SCRIPT
 
@@ -200,23 +208,61 @@ cat > /etc/cron.d/mediawiki-backup <<'CRON'
 0 2 * * * root /usr/local/bin/backup-mediawiki.sh >> /var/log/mediawiki-backup.log 2>&1
 CRON
 
-# Install Cloudwatch agent
+# Install CloudWatch agent
 wget https://s3.amazonaws.com/amazoncloudwatch-agent/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb
 dpkg -i -E ./amazon-cloudwatch-agent.deb
 
-# Configure Cloudwatch agent
+# Configure CloudWatch agent
 cat > /opt/aws/amazon-cloudwatch-agent/etc/config.json <<'CWCONFIG'
 {
   "logs": {
     "logs_collected": {
       "files": {
-        "collected_list": [
+        "collect_list": [
+          {
+            "file_path": "/var/log/apache2/mediawiki-error.log",
+            "log_group_name": "/mediawiki/apache-error",
+            "log_stream_name": "{instance_id}"
+          },
+          {
+            "file_path": "/var/log/apache2/mediawiki-access.log",
+            "log_group_name": "/mediawiki/apache-access",
+            "log_stream_name": "{instance_id}"
+          },
           {
             "file_path": "/var/log/mediawiki-backup.log",
-            "log_group_name": "/mediawiki/apache-error",
-            "log-stream-name": "{instance_id}"
+            "log_group_name": "/mediawiki/backup",
+            "log_stream_name": "{instance_id}"
           }
-        }
+        ]
+      }
+    }
+  },
+  "metrics": {
+    "namespace": "MediaWiki",
+    "metrics_collected": {
+      "mem": {
+        "measurement": [
+          {
+            "name": "mem_used_percent",
+            "rename": "MemoryUtilization",
+            "unit": "Percent"
+          }
+        ],
+        "metrics_collection_interval": 60
+      },
+      "disk": {
+        "measurement": [
+          {
+            "name": "used_percent",
+            "rename": "DiskUtilization",
+            "unit": "Percent"
+          }
+        ],
+        "metrics_collection_interval": 60,
+        "resources": [
+          "/"
+        ]
       }
     }
   }
@@ -224,14 +270,12 @@ cat > /opt/aws/amazon-cloudwatch-agent/etc/config.json <<'CWCONFIG'
 CWCONFIG
 
 /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
-	-a fetch-config \
-	-m ec2 \
-	-s \
-	-c file:/opt/aws/amazon-cloudwatch-agent/etc/config.json
+    -a fetch-config \
+    -m ec2 \
+    -s \
+    -c file:/opt/aws/amazon-cloudwatch-agent/etc/config.json
 
 # Run initial backup
 /usr/local/bin/backup-mediawiki.sh
 
 echo "MediaWiki installation complete!"
-
-
